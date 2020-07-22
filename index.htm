@@ -1,0 +1,221 @@
+<html>
+
+<head>
+  <title>England & Wales Population | DeckGL Demo</title>
+
+  <script src="https://unpkg.com/deck.gl@^8.2.3/dist.min.js"></script>
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+
+  <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v1.4.0/mapbox-gl.js"></script>
+
+  <style type="text/css">
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+    }
+
+    #control-panel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      margin: 12px;
+      padding: 20px;
+      font-size: 12px;
+      line-height: 1.5;
+      z-index: 1;
+      background: #fff;
+      font-family: Helvetica, Arial, sans-serif;
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+    }
+
+    label {
+      display: inline-block;
+      width: 140px;
+    }
+
+    .title {
+      font-size: 1.6em;
+      font-weight: 700;
+    }
+
+    .footer {
+      font-size: 1em;
+      margin-top: 30px;
+      color: #777;
+    }
+
+    .deck-tooltip {
+      font-size: 0.8em;
+    }
+
+    .block {
+      margin-bottom: 20px;
+    }
+
+    .legend {
+      display: table;
+      width: 100%;
+      white-space: nowrap;
+    }
+
+    .bar {
+      display: table-cell;
+      width: 20%;
+      height: 10px;
+      background-color: black;
+    }
+
+    .item {
+      display: table-cell;
+      width: 50%;
+    }
+
+    .right {
+      text-align: right;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="control-panel">
+    <div class="block">
+      <span class="title">England & Wales Population Map</span>
+    </div>
+    <div class="block">
+      <div class="legend">
+        <div id="leg0" class="bar"></div>
+        <div id="leg1" class="bar"></div>
+        <div id="leg2" class="bar"></div>
+        <div id="leg3" class="bar"></div>
+        <div id="leg4" class="bar"></div>
+      </div>
+      <div class="legend">
+        <div class="item">Fewer people</div>
+        <div class="item right">More people</div>
+      </div>
+    </div>
+    <div>
+      <label>Radius</label>
+      <input id="radius" type="range" min="1000" max="10000" step="1000" value="2000"></input>
+      <span id="radius-value"></span>
+    </div>
+    <div>
+      <label>Coverage</label>
+      <input id="coverage" type="range" min="0" max="1" step="0.1" value="0.9"></input>
+      <span id="coverage-value"></span>
+    </div>
+    <div>
+      <label>Upper Percentile</label>
+      <input id="upperPercentile" type="range" min="90" max="100" step="1" value="100"></input>
+      <span id="upperPercentile-value"></span>
+    </div>
+    <div class="footer">
+      Visualization made with <a href="https://deck.gl/" target="_blank">DeckGL</a>. Data from <a
+        href="https://www.nomisweb.co.uk/census/2011/ks101ew" target="_blank">ONS/Nomis, 2011</a>.
+    </div>
+  </div>
+</body>
+
+<script type="text/javascript">
+
+  const { DeckGL, HexagonLayer } = deck;
+
+  const deckgl = new DeckGL({
+    mapboxApiAccessToken: 'pk.eyJ1IjoiYXJrYmFyY2xheSIsImEiOiJjamdxeDF3ZXMzN2IyMnFyd3EwdGcwMDVxIn0.P2bkpp8HGNeY3-FOsxXVvA',
+    mapStyle: 'https://bothness.github.io/census-dots/data/style-dark.json',
+    initialViewState: {
+      longitude: -1.4157,
+      latitude: 52.2324,
+      zoom: 6,
+      minZoom: 5,
+      maxZoom: 15,
+      pitch: 40.5
+    },
+    controller: true
+  });
+
+  let data = null;
+
+  const OPTIONS = ['radius', 'coverage', 'upperPercentile'];
+
+  const COLOR_RANGE = [
+    [12, 44, 132],
+    [34, 94, 168],
+    [29, 145, 192],
+    [65, 182, 196],
+    [127, 205, 187]
+  ];
+
+  OPTIONS.forEach(key => {
+    document.getElementById(key).oninput = renderLayer;
+  });
+
+  function renderLayer() {
+    const options = {};
+    OPTIONS.forEach(key => {
+      const value = document.getElementById(key).value;
+      document.getElementById(key + '-value').innerHTML = value;
+      options[key] = Number(value);
+    });
+
+    const hexagonLayer = new HexagonLayer({
+      id: 'heatmap',
+      colorRange: COLOR_RANGE,
+      data,
+      elevationRange: [0, 1000],
+      elevationScale: 250,
+      extruded: true,
+      pickable: true,
+      getPosition: d => d,
+      ...options
+    });
+
+    deckgl.setProps({
+      controller: true,
+      layers: [hexagonLayer],
+      getTooltip: getTooltip
+    });
+  }
+
+  function getTooltip({ object }) {
+    if (!object) {
+      return null;
+    }
+    const lat = object.position[1];
+    const lng = object.position[0];
+    const count = (object.points.length * 100).toLocaleString();
+
+    return `\
+    latitude: ${Number.isFinite(lat) ? lat.toFixed(6) : ''}
+    longitude: ${Number.isFinite(lng) ? lng.toFixed(6) : ''}
+    ${count} People`;
+  }
+
+  d3.csv('./data.csv')
+    .then(response => {
+      let lnglat = response.map(d => [Number(d.lng), Number(d.lat)]);
+      let vals = response.map(d => Number(d.val));
+      let points = [];
+      for (const i in vals) {
+        let count = Math.round(vals[i] / 100);
+        for (var j = 0; j < count; j++) {
+          points.push(lnglat[i]);
+        }
+      }
+      data = points;
+      renderLayer();
+    });
+
+  function makeLegend(colors) {
+    for (i in colors) {
+      document.getElementById('leg' + i).style = 'background-color: rgb(' + colors[i].toString() + ');';
+    }
+  };
+
+  makeLegend(COLOR_RANGE);
+
+</script>
+
+</html>
